@@ -1,0 +1,301 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>MangaVault - Katalog Koleksi Komik Pribadi</title>
+  <meta name="description" content="Koleksi komik dan manga pribadi lengkap dengan status volume, penerbit, dan sampul buku. Disinkronkan dengan Google Sheets.">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@400;500;600;700;800&family=Plus+Jakarta+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <div class="app-container">
+    <!-- Top Navigation / Header -->
+    <header class="navbar">
+      <div class="brand-section">
+        <div class="brand-icon">
+          <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"></path>
+            <path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"></path>
+            <path d="M8 7h8"></path>
+            <path d="M8 11h6"></path>
+          </svg>
+        </div>
+        <div>
+          <h1 class="brand-title">Manga<span>Vault</span></h1>
+          <p class="brand-subtitle">Arsip Koleksi Komik & Manga Pribadi</p>
+        </div>
+      </div>
+
+      <div class="header-actions">
+        <div class="sync-status-box" id="syncStatus">
+          <span class="pulse-dot"></span>
+          <span id="syncStatusText">Data Tersinkron</span>
+        </div>
+        <button id="btnSync" class="btn btn-secondary" title="Muat data terbaru dari Google Sheets">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M21.5 2v6h-6M2.5 22v-6h6M2 11.5a10 10 0 0 1 18.8-4.3M22 12.5a10 10 0 0 1-18.8 4.2"/>
+          </svg>
+          Sync Sheet
+        </button>
+      </div>
+    </header>
+
+    <!-- Stats Dashboard Section -->
+    <section class="stats-grid">
+      <div class="stat-card stat-total">
+        <div class="stat-icon">📚</div>
+        <div class="stat-info">
+          <span class="stat-label">Total Judul</span>
+          <span class="stat-value" id="statTotalTitles">0</span>
+        </div>
+      </div>
+      <div class="stat-card stat-volumes">
+        <div class="stat-icon">📦</div>
+        <div class="stat-info">
+          <span class="stat-label">Total Volume Dimiliki</span>
+          <span class="stat-value" id="statTotalVolumes">0</span>
+        </div>
+      </div>
+      <div class="stat-card stat-complete">
+        <div class="stat-icon">✨</div>
+        <div class="stat-info">
+          <span class="stat-label">Koleksi Komplit</span>
+          <span class="stat-value" id="statComplete">0</span>
+        </div>
+        <div class="stat-badge" id="statCompletePercent">0%</div>
+      </div>
+      <div class="stat-card stat-pending">
+        <div class="stat-icon">🧩</div>
+        <div class="stat-info">
+          <span class="stat-label">Bolong-bolong</span>
+          <span class="stat-value" id="statBolong">0</span>
+        </div>
+      </div>
+      <div class="stat-card stat-later">
+        <div class="stat-icon">⏳</div>
+        <div class="stat-info">
+          <span class="stat-label">Nanti Dulu Deh</span>
+          <span class="stat-value" id="statLater">0</span>
+        </div>
+      </div>
+    </section>
+
+    <!-- Main Content & Filters -->
+    <main class="content-wrapper">
+      <!-- Toolbar Filter & Search -->
+      <section class="filter-toolbar">
+        <div class="search-box">
+          <svg class="search-icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <circle cx="11" cy="11" r="8"></circle>
+            <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
+          </svg>
+          <input type="text" id="searchInput" placeholder="Cari judul komik, pengarang, penerbit, catatan..." autocomplete="off">
+          <button id="btnClearSearch" class="btn-icon-clear" style="display: none;" title="Hapus pencarian">&times;</button>
+        </div>
+
+        <div class="filter-controls">
+          <!-- Status Tabs -->
+          <div class="status-tabs" id="statusTabs">
+            <button class="tab-btn active" data-status="all">Semua</button>
+            <button class="tab-btn" data-status="Komplit">Komplit</button>
+            <button class="tab-btn" data-status="Bolong-bolong">Bolong-bolong</button>
+            <button class="tab-btn" data-status="Nanti dulu deh">Nanti Dulu</button>
+          </div>
+
+          <!-- Publisher Dropdown -->
+          <div class="select-wrapper">
+            <select id="publisherFilter">
+              <option value="all">Semua Penerbit</option>
+            </select>
+          </div>
+
+          <!-- Format/Jenis Dropdown -->
+          <div class="select-wrapper">
+            <select id="typeFilter">
+              <option value="all">Semua Jenis</option>
+              <option value="Series">Series</option>
+              <option value="One Shot">One Shot</option>
+              <option value="Novel/Light Novel">Novel / Light Novel</option>
+            </select>
+          </div>
+
+          <!-- Sort Dropdown -->
+          <div class="select-wrapper">
+            <select id="sortFilter">
+              <option value="no-asc">Nomor (1 → Akhir)</option>
+              <option value="no-desc">Nomor (Akhir → 1)</option>
+              <option value="title-asc">Judul (A → Z)</option>
+              <option value="title-desc">Judul (Z → A)</option>
+              <option value="vol-desc">Volume Terbanyak</option>
+              <option value="vol-asc">Volume Tersedikit</option>
+            </select>
+          </div>
+
+          <!-- View Mode (Grid / List) -->
+          <div class="view-toggle">
+            <button id="btnGridView" class="view-btn active" title="Tampilan Grid Cover">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <rect x="3" y="3" width="7" height="7"></rect>
+                <rect x="14" y="3" width="7" height="7"></rect>
+                <rect x="14" y="14" width="7" height="7"></rect>
+                <rect x="3" y="14" width="7" height="7"></rect>
+              </svg>
+            </button>
+            <button id="btnListView" class="view-btn" title="Tampilan Tabel">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <line x1="8" y1="6" x2="21" y2="6"></line>
+                <line x1="8" y1="12" x2="21" y2="12"></line>
+                <line x1="8" y1="18" x2="21" y2="18"></line>
+                <line x1="3" y1="6" x2="3.01" y2="6"></line>
+                <line x1="3" y1="12" x2="3.01" y2="12"></line>
+                <line x1="3" y1="18" x2="3.01" y2="18"></line>
+              </svg>
+            </button>
+          </div>
+        </div>
+      </section>
+
+      <!-- Active Filters Tag Bar -->
+      <div class="results-info-bar">
+        <span id="resultsCount">Menampilkan 0 buku</span>
+        <div class="cover-cache-status" id="coverCacheStatus" title="Status penyimpanan cache sampul lokal">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect>
+            <circle cx="8.5" cy="8.5" r="1.5"></circle>
+            <polyline points="21 15 16 10 5 21"></polyline>
+          </svg>
+          <span id="coverCacheText">Cache Cover Aktif</span>
+        </div>
+      </div>
+
+      <!-- Manga Grid View -->
+      <section id="mangaGrid" class="manga-grid"></section>
+
+      <!-- Manga Table View (Hidden by default) -->
+      <div id="mangaTableContainer" class="table-container" style="display: none;">
+        <table class="manga-table">
+          <thead>
+            <tr>
+              <th>No</th>
+              <th>Sampul</th>
+              <th>Judul</th>
+              <th>Pengarang</th>
+              <th>Penerbit</th>
+              <th>Status Indo</th>
+              <th>Volume Dimiliki</th>
+              <th>Status Koleksi</th>
+              <th>Catatan</th>
+            </tr>
+          </thead>
+          <tbody id="mangaTableBody"></tbody>
+        </table>
+      </div>
+
+      <!-- Empty State -->
+      <div id="emptyState" class="empty-state" style="display: none;">
+        <div class="empty-icon">🔍</div>
+        <h3>Tidak ada komik yang sesuai</h3>
+        <p>Coba gunakan kata kunci pencarian lain atau reset filter Anda.</p>
+        <button id="btnResetFilters" class="btn btn-primary">Reset Filter</button>
+      </div>
+
+      <!-- Pagination / Load More -->
+      <div class="pagination-wrapper" id="paginationWrapper">
+        <button id="btnLoadMore" class="btn btn-load-more">
+          Muat Lebih Banyak
+          <span id="loadMoreCount"></span>
+        </button>
+      </div>
+    </main>
+
+    <!-- Footer -->
+    <footer class="app-footer">
+      <p>MangaVault • Sinkronisasi Langsung dari Google Spreadsheet • Cover powered by Jikan (MyAnimeList)</p>
+    </footer>
+  </div>
+
+  <!-- Detail Modal -->
+  <div id="detailModal" class="modal-backdrop" style="display: none;">
+    <div class="modal-card">
+      <button class="modal-close" id="btnModalClose">&times;</button>
+      <div class="modal-layout">
+        <div class="modal-cover-wrapper" id="modalCoverWrapper">
+          <img id="modalCoverImg" src="" alt="Cover" class="modal-cover-img" style="display: none;">
+          <div id="modalCoverFallback" class="modal-cover-fallback"></div>
+        </div>
+        <div class="modal-details">
+          <div class="modal-header-meta">
+            <span class="badge" id="modalTypeBadge">Series</span>
+            <span class="badge" id="modalPublisherBadge">Elex</span>
+            <span class="badge" id="modalStatusBadge">Komplit</span>
+          </div>
+          <h2 class="modal-title" id="modalTitle">Judul Manga</h2>
+          <p class="modal-author" id="modalAuthor">Nama Pengarang</p>
+
+          <div class="volume-card">
+            <div class="volume-header">
+              <span class="volume-title">Progres Koleksi Volume</span>
+              <span class="volume-count" id="modalVolumeProgressText">0 / 0 Vol</span>
+            </div>
+            <div class="progress-bar-bg">
+              <div class="progress-bar-fill" id="modalVolumeProgressBar" style="width: 0%;"></div>
+            </div>
+            <div class="volume-details-grid">
+              <div class="vol-meta-item">
+                <span class="vol-meta-label">Volume yang Dimiliki</span>
+                <span class="vol-meta-value highlight" id="modalPunyaVolume">-</span>
+              </div>
+              <div class="vol-meta-item">
+                <span class="vol-meta-label">Total Terbit di Indo</span>
+                <span class="vol-meta-value" id="modalTotalTerbit">-</span>
+              </div>
+              <div class="vol-meta-item">
+                <span class="vol-meta-label">Status Terbit</span>
+                <span class="vol-meta-value" id="modalStatusTerbit">-</span>
+              </div>
+              <div class="vol-meta-item">
+                <span class="vol-meta-label">Total Volume Koleksi</span>
+                <span class="vol-meta-value" id="modalTotalKoleksi">-</span>
+              </div>
+            </div>
+          </div>
+
+          <div class="modal-notes-section" id="modalNotesSection">
+            <h4 class="section-title">Catatan Koleksi</h4>
+            <p class="notes-content" id="modalCatatan">Tidak ada catatan.</p>
+          </div>
+
+          <div class="modal-actions">
+            <a id="modalMalLink" href="#" target="_blank" rel="noopener noreferrer" class="btn btn-secondary btn-external">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"></path>
+                <polyline points="15 3 21 3 21 9"></polyline>
+                <line x1="10" y1="14" x2="21" y2="3"></line>
+              </svg>
+              Cari di MyAnimeList
+            </a>
+            <a id="modalGoogleLink" href="#" target="_blank" rel="noopener noreferrer" class="btn btn-ghost btn-external">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <circle cx="11" cy="11" r="8"></circle>
+                <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
+              </svg>
+              Cari di Google
+            </a>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Toast Notification Container -->
+  <div id="toastContainer" class="toast-container"></div>
+
+  <!-- Initial Snapshot Data -->
+  <script src="data.js"></script>
+  <!-- Main Application Logic -->
+  <script src="app.js"></script>
+</body>
+</html>
