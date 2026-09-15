@@ -1,6 +1,6 @@
 /**
- * MangaVault - Personal Manga Collection Catalog
- * Handles Google Sheets live sync, AniList API cover fetching, search & filtering, and statistics.
+ * MangaVault - Personal Manga Collection Catalog & Reading Tracker
+ * Handles Google Sheets two-way sync, MangaUpdates cover integration, reading tracker, and statistics.
  */
 
 // Configuration & State
@@ -8,8 +8,10 @@ const CONFIG = {
   SHEET_CSV_URL: 'https://docs.google.com/spreadsheets/d/1Xew5o7ULMmckqOhxIlBQJ1dqHGbREYCGxv47hvkFPS8/gviz/tq?tqx=out:csv',
   ANILIST_API_URL: 'https://graphql.anilist.co',
   CACHE_PREFIX: 'mv_cover_cache_v3_',
+  TRACKER_STORAGE_KEY: 'mv_reading_tracker_v1',
+  SETTINGS_STORAGE_KEY: 'mv_settings_v1',
   ITEMS_PER_PAGE: 36,
-  RATE_LIMIT_DELAY: 400 // ms between AniList API calls
+  RATE_LIMIT_DELAY: 400
 };
 
 // Title translation/mapping for better API matching on Indonesian localized titles
@@ -39,27 +41,22 @@ const TITLE_MAPPINGS = {
   'fist of the north star': 'Hokuto no Ken',
   'dr. slump (bunkoban)': 'Dr. Slump',
   'slam dunk new edition (satuan)': 'Slam Dunk',
-  'jojo\'s bizzare adventure': 'JoJo no Kimyou na Bouken',
   'teasing master, takagi': 'Karakai Jouzu no Takagi-san',
   'boruto - naruto next generation': 'Boruto: Naruto Next Generations',
   'the quintessential quintuplets': '5-toubun no Hanayome',
   'wotakoi: love is hard for otaku': 'Wotaku ni Koi wa Muzukashii',
-  'dead mount death play': 'Dead Mount Death Play',
-  'sakamoto days': 'Sakamoto Days',
   'kanojo okarishimasu': 'Kanojo, Okarishimasu',
   'bungo stray dogs': 'Bungou Stray Dogs',
   'a couple of cuckoos': 'Kakkou no Iinazuke',
   'alice in borderland': 'Imawa no Kuni no Alice',
   'kubo won\'t let me be invisible': 'Kubo-san wa Mob wo Yurusanai',
-  'blood lad': 'Blood Lad',
-  'mashle': 'Mashle',
-  'one week friends': 'Isshuukan Friends.',
   'the promised neverland': 'Yakusoku no Neverland',
-  'chainsaw man': 'Chainsaw Man',
   'demon slayer: kimetsu no yaiba': 'Kimetsu no Yaiba',
+  'kaguya-sama: love is war': 'Kaguya-sama wa Kokurasetai',
+  'one week friends': 'Isshuukan Friends.',
+  'chainsaw man': 'Chainsaw Man',
   'jujutsu kaisen': 'Jujutsu Kaisen',
-  'spy x family': 'Spy x Family',
-  'kaguya-sama: love is war': 'Kaguya-sama wa Kokurasetai: Tensai-tachi no Renai Zunousen'
+  'spy x family': 'Spy x Family'
 };
 
 const state = {
@@ -68,12 +65,19 @@ const state = {
   currentPage: 1,
   activeFilter: {
     status: 'all',
+    readingStatus: 'all',
     publisher: 'all',
     type: 'all',
     search: '',
     sort: 'no-asc'
   },
   viewMode: 'grid',
+  activeItem: null,
+  activeRating: 0,
+  readingTracker: {},
+  settings: {
+    webhookUrl: ''
+  },
   coverQueue: [],
   isProcessingQueue: false,
   observer: null
@@ -83,14 +87,16 @@ const state = {
 const DOM = {
   statTotalTitles: document.getElementById('statTotalTitles'),
   statTotalVolumes: document.getElementById('statTotalVolumes'),
+  statCurrentlyReading: document.getElementById('statCurrentlyReading'),
+  statFinishedReading: document.getElementById('statFinishedReading'),
+  statReadPercent: document.getElementById('statReadPercent'),
   statComplete: document.getElementById('statComplete'),
-  statCompletePercent: document.getElementById('statCompletePercent'),
   statBolong: document.getElementById('statBolong'),
-  statLater: document.getElementById('statLater'),
 
   searchInput: document.getElementById('searchInput'),
   btnClearSearch: document.getElementById('btnClearSearch'),
   statusTabs: document.getElementById('statusTabs'),
+  readingStatusFilter: document.getElementById('readingStatusFilter'),
   publisherFilter: document.getElementById('publisherFilter'),
   typeFilter: document.getElementById('typeFilter'),
   sortFilter: document.getElementById('sortFilter'),
@@ -99,6 +105,7 @@ const DOM = {
   btnListView: document.getElementById('btnListView'),
   btnSync: document.getElementById('btnSync'),
   syncStatusText: document.getElementById('syncStatusText'),
+  btnOpenSettings: document.getElementById('btnOpenSettings'),
 
   resultsCount: document.getElementById('resultsCount'),
   mangaGrid: document.getElementById('mangaGrid'),
@@ -111,6 +118,7 @@ const DOM = {
   btnLoadMore: document.getElementById('btnLoadMore'),
   loadMoreCount: document.getElementById('loadMoreCount'),
 
+  // Detail Modal
   detailModal: document.getElementById('detailModal'),
   btnModalClose: document.getElementById('btnModalClose'),
   modalCoverImg: document.getElementById('modalCoverImg'),
@@ -120,6 +128,22 @@ const DOM = {
   modalTypeBadge: document.getElementById('modalTypeBadge'),
   modalPublisherBadge: document.getElementById('modalPublisherBadge'),
   modalStatusBadge: document.getElementById('modalStatusBadge'),
+
+  // Tracker Controls
+  modalReadingStatusSelect: document.getElementById('modalReadingStatusSelect'),
+  inputReadVol: document.getElementById('inputReadVol'),
+  btnStepMinus: document.getElementById('btnStepMinus'),
+  btnStepPlus: document.getElementById('btnStepPlus'),
+  btnSetMaxVol: document.getElementById('btnSetMaxVol'),
+  modalReadFraction: document.getElementById('modalReadFraction'),
+  modalReadingProgressBar: document.getElementById('modalReadingProgressBar'),
+  ratingStarsContainer: document.getElementById('ratingStarsContainer'),
+  ratingValueDisplay: document.getElementById('ratingValueDisplay'),
+  inputReview: document.getElementById('inputReview'),
+  btnSaveReadingTracker: document.getElementById('btnSaveReadingTracker'),
+  trackerSaveStatus: document.getElementById('trackerSaveStatus'),
+
+  // Physical Collection Info
   modalVolumeProgressText: document.getElementById('modalVolumeProgressText'),
   modalVolumeProgressBar: document.getElementById('modalVolumeProgressBar'),
   modalPunyaVolume: document.getElementById('modalPunyaVolume'),
@@ -127,8 +151,15 @@ const DOM = {
   modalStatusTerbit: document.getElementById('modalStatusTerbit'),
   modalTotalKoleksi: document.getElementById('modalTotalKoleksi'),
   modalCatatan: document.getElementById('modalCatatan'),
+  modalMuLink: document.getElementById('modalMuLink'),
   modalMalLink: document.getElementById('modalMalLink'),
-  modalGoogleLink: document.getElementById('modalGoogleLink'),
+
+  // Settings Modal
+  settingsModal: document.getElementById('settingsModal'),
+  btnSettingsClose: document.getElementById('btnSettingsClose'),
+  inputWebhookUrl: document.getElementById('inputWebhookUrl'),
+  btnSaveSettings: document.getElementById('btnSaveSettings'),
+  btnExportBackup: document.getElementById('btnExportBackup'),
 
   toastContainer: document.getElementById('toastContainer')
 };
@@ -137,6 +168,8 @@ const DOM = {
 // Initialization
 // ==========================================
 document.addEventListener('DOMContentLoaded', () => {
+  loadStoredSettings();
+  loadStoredReadingTracker();
   setupEventListeners();
   setupIntersectionObserver();
 
@@ -148,8 +181,36 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 });
 
+function loadStoredSettings() {
+  try {
+    const raw = localStorage.getItem(CONFIG.SETTINGS_STORAGE_KEY);
+    if (raw) state.settings = JSON.parse(raw);
+    if (DOM.inputWebhookUrl && state.settings.webhookUrl) {
+      DOM.inputWebhookUrl.value = state.settings.webhookUrl;
+    }
+  } catch (e) {}
+}
+
+function loadStoredReadingTracker() {
+  try {
+    const raw = localStorage.getItem(CONFIG.TRACKER_STORAGE_KEY);
+    if (raw) state.readingTracker = JSON.parse(raw);
+  } catch (e) {}
+}
+
 function loadData(data) {
-  state.allManga = data;
+  // Merge readingTracker into manga items
+  state.allManga = data.map(item => {
+    const tracker = state.readingTracker[item.no] || {};
+    return {
+      ...item,
+      statusBaca: tracker.statusBaca || item.statusBaca || 'Belum Dibaca',
+      volDibaca: tracker.volDibaca !== undefined ? tracker.volDibaca : (parseInt(item.volDibaca) || 0),
+      rating: tracker.rating !== undefined ? tracker.rating : (parseInt(item.rating) || 0),
+      reviewBaca: tracker.reviewBaca || item.reviewBaca || ''
+    };
+  });
+
   populatePublishersDropdown();
   updateStatistics();
   applyFilters();
@@ -170,10 +231,7 @@ async function syncWithGoogleSheet() {
     const parsedData = parseCSV(csvText);
 
     if (parsedData.length > 0) {
-      state.allManga = parsedData;
-      populatePublishersDropdown();
-      updateStatistics();
-      applyFilters();
+      loadData(parsedData);
       DOM.syncStatusText.textContent = `Tersinkron: ${new Date().toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}`;
       showToast(`Berhasil menyinkronkan ${parsedData.length} data komik!`, 'success');
     }
@@ -206,8 +264,10 @@ function parseCSV(text) {
     const row = parseCSVLine(line);
     if (!row[1] || row[1].trim() === '' || row[1].toLowerCase().includes('total')) continue;
 
+    const no = parseInt(row[0]) || (items.length + 1);
+
     items.push({
-      no: parseInt(row[0]) || (items.length + 1),
+      no: no,
       judul: row[1] || '',
       pengarang: row[2] || '',
       penerbit: row[3] || '',
@@ -220,7 +280,12 @@ function parseCSV(text) {
       statusKoleksi: row[10] || 'Lainnya',
       punyaVolume: row[11] || '',
       totalKoleksi: parseInt(row[12]) || row[12] || 0,
-      catatan: row[13] || ''
+      catatan: row[13] || '',
+      // Reading Tracker columns (Col O, P, Q, R)
+      statusBaca: row[14] || 'Belum Dibaca',
+      volDibaca: parseInt(row[15]) || 0,
+      rating: parseInt(row[16]) || 0,
+      reviewBaca: row[17] || ''
     });
   }
 
@@ -259,7 +324,8 @@ function updateStatistics() {
   let totalVolumes = 0;
   let completeCount = 0;
   let bolongCount = 0;
-  let laterCount = 0;
+  let readingCount = 0;
+  let finishedCount = 0;
 
   state.allManga.forEach(item => {
     const vol = typeof item.totalKoleksi === 'number' ? item.totalKoleksi : parseInt(item.totalKoleksi) || 0;
@@ -270,8 +336,13 @@ function updateStatistics() {
       completeCount++;
     } else if (status.includes('bolong')) {
       bolongCount++;
-    } else if (status.includes('nanti')) {
-      laterCount++;
+    }
+
+    const rStatus = (item.statusBaca || '').toLowerCase();
+    if (rStatus.includes('sedang')) {
+      readingCount++;
+    } else if (rStatus.includes('selesai')) {
+      finishedCount++;
     }
   });
 
@@ -279,10 +350,11 @@ function updateStatistics() {
   DOM.statTotalVolumes.textContent = totalVolumes.toLocaleString('id-ID');
   DOM.statComplete.textContent = completeCount.toLocaleString('id-ID');
   DOM.statBolong.textContent = bolongCount.toLocaleString('id-ID');
-  DOM.statLater.textContent = laterCount.toLocaleString('id-ID');
+  DOM.statCurrentlyReading.textContent = readingCount.toLocaleString('id-ID');
+  DOM.statFinishedReading.textContent = finishedCount.toLocaleString('id-ID');
 
-  const percent = totalTitles > 0 ? Math.round((completeCount / totalTitles) * 100) : 0;
-  DOM.statCompletePercent.textContent = `${percent}%`;
+  const readPercent = totalTitles > 0 ? Math.round((finishedCount / totalTitles) * 100) : 0;
+  DOM.statReadPercent.textContent = `${readPercent}% Tamat`;
 }
 
 // ==========================================
@@ -311,10 +383,11 @@ function populatePublishersDropdown() {
 }
 
 function applyFilters() {
-  const { status, publisher, type, search, sort } = state.activeFilter;
+  const { status, readingStatus, publisher, type, search, sort } = state.activeFilter;
   const q = search.trim().toLowerCase();
 
   state.filteredManga = state.allManga.filter(item => {
+    // Physical collection status
     if (status !== 'all') {
       const itemStatus = (item.statusKoleksi || '').toLowerCase();
       if (status === 'Komplit' && !itemStatus.includes('komplit')) return false;
@@ -322,25 +395,40 @@ function applyFilters() {
       if (status === 'Nanti dulu deh' && !itemStatus.includes('nanti')) return false;
     }
 
+    // Reading Status Filter
+    if (readingStatus !== 'all') {
+      const curReadStatus = (item.statusBaca || 'Belum Dibaca').toLowerCase();
+      if (readingStatus === 'Sedang Dibaca' && !curReadStatus.includes('sedang')) return false;
+      if (readingStatus === 'Selesai' && !curReadStatus.includes('selesai')) return false;
+      if (readingStatus === 'Belum Dibaca' && (!curReadStatus.includes('belum') && curReadStatus !== '')) return false;
+      if (readingStatus === 'On Hold' && !curReadStatus.includes('hold')) return false;
+      if (readingStatus === 'Dropped' && !curReadStatus.includes('drop')) return false;
+    }
+
+    // Publisher filter
     if (publisher !== 'all' && (item.penerbit || '').trim() !== publisher) {
       return false;
     }
 
+    // Type filter
     if (type !== 'all' && (item.jenis || '').trim().toLowerCase() !== type.toLowerCase()) {
       return false;
     }
 
+    // Search query
     if (q) {
       const titleMatch = (item.judul || '').toLowerCase().includes(q);
       const authorMatch = (item.pengarang || '').toLowerCase().includes(q) || (item.story || '').toLowerCase().includes(q);
       const pubMatch = (item.penerbit || '').toLowerCase().includes(q);
       const noteMatch = (item.catatan || '').toLowerCase().includes(q);
-      if (!titleMatch && !authorMatch && !pubMatch && !noteMatch) return false;
+      const reviewMatch = (item.reviewBaca || '').toLowerCase().includes(q);
+      if (!titleMatch && !authorMatch && !pubMatch && !noteMatch && !reviewMatch) return false;
     }
 
     return true;
   });
 
+  // Sorting
   state.filteredManga.sort((a, b) => {
     switch (sort) {
       case 'no-asc': return a.no - b.no;
@@ -348,7 +436,8 @@ function applyFilters() {
       case 'title-asc': return (a.judul || '').localeCompare(b.judul || '');
       case 'title-desc': return (b.judul || '').localeCompare(a.judul || '');
       case 'vol-desc': return (parseInt(b.totalKoleksi) || 0) - (parseInt(a.totalKoleksi) || 0);
-      case 'vol-asc': return (parseInt(a.totalKoleksi) || 0) - (parseInt(b.totalKoleksi) || 0);
+      case 'rating-desc': return (parseInt(b.rating) || 0) - (parseInt(a.rating) || 0);
+      case 'read-desc': return (parseInt(b.volDibaca) || 0) - (parseInt(a.volDibaca) || 0);
       default: return a.no - b.no;
     }
   });
@@ -413,22 +502,35 @@ function renderGrid() {
     const totalVolume = parseInt(item.totalVolume) || 0;
     const progressPercent = totalVolume > 0 ? Math.min(100, Math.round((totalKoleksi / totalVolume) * 100)) : (totalKoleksi > 0 ? 100 : 0);
 
-    // Check if we already have the cover (from preloaded dictionary or local storage)
     const knownCover = getKnownCover(cleanTitle, item.judul);
+
+    // Reading badge logic
+    let readingBadgeHTML = '';
+    if (item.statusBaca === 'Sedang Dibaca') {
+      readingBadgeHTML = `<span class="card-reading-badge badge-reading">📖 Vol ${item.volDibaca || 0}</span>`;
+    } else if (item.statusBaca === 'Selesai') {
+      readingBadgeHTML = `<span class="card-reading-badge badge-read-finished">✅ Selesai</span>`;
+    }
+
+    // Rating badge logic
+    let ratingBadgeHTML = '';
+    if (item.rating && item.rating > 0) {
+      ratingBadgeHTML = `<span class="card-rating-badge">★ ${item.rating}</span>`;
+    }
 
     card.innerHTML = `
       <div class="card-cover-container" data-title="${encodeURIComponent(cleanTitle)}" data-raw-title="${encodeURIComponent(item.judul)}">
         <span class="card-number-badge">#${item.no}</span>
         <span class="card-status-badge ${statusBadge.class}">${statusBadge.label}</span>
+        ${readingBadgeHTML}
+        ${ratingBadgeHTML}
         
-        <!-- Image element -->
         <img class="card-cover-img ${knownCover ? 'loaded' : ''}" 
              src="${knownCover || ''}" 
              alt="${escapeHTML(item.judul)}" 
              loading="lazy" 
              style="${knownCover ? 'display:block;opacity:1;' : ''}">
         
-        <!-- Fallback stylized book cover -->
         <div class="card-fallback-cover" style="${knownCover ? 'display:none;' : ''}">
           <span class="fallback-publisher">${escapeHTML(publisherName)}</span>
           <h3 class="fallback-title">${escapeHTML(item.judul)}</h3>
@@ -447,7 +549,7 @@ function renderGrid() {
         
         <div class="card-footer-info">
           <div class="card-volume-bar-wrap">
-            <span>Volume: ${totalKoleksi}${totalVolume > 0 ? ' / ' + totalVolume : ''}</span>
+            <span>Koleksi: ${totalKoleksi}${totalVolume > 0 ? ' / ' + totalVolume : ''}</span>
             <span>${progressPercent}%</span>
           </div>
           <div class="volume-mini-progress">
@@ -459,7 +561,6 @@ function renderGrid() {
 
     card.addEventListener('click', () => openDetailModal(item));
 
-    // If cover not yet known, observe for lazy loading via AniList API
     if (!knownCover) {
       const coverContainer = card.querySelector('.card-cover-container');
       if (state.observer) {
@@ -496,10 +597,14 @@ function renderTable() {
       <td><strong>${escapeHTML(item.judul)}</strong></td>
       <td>${escapeHTML(item.pengarang || item.story || '-')}</td>
       <td><span class="card-publisher">${escapeHTML(item.penerbit || '-')}</span></td>
-      <td>${escapeHTML(item.statusTerbit || '-')}</td>
       <td>${escapeHTML(item.punyaVolume || (item.totalKoleksi ? item.totalKoleksi + ' Vol' : '-'))}</td>
       <td><span class="table-badge ${statusBadge.class}">${statusBadge.label}</span></td>
-      <td style="color:#94a3b8;font-size:0.78rem;">${escapeHTML(item.catatan || '-')}</td>
+      <td>
+        <span class="table-badge ${item.statusBaca === 'Selesai' ? 'badge-komplit' : (item.statusBaca === 'Sedang Dibaca' ? 'badge-reading' : 'badge-other')}">
+          ${escapeHTML(item.statusBaca || 'Belum')} (${item.volDibaca || 0} Vol)
+        </span>
+      </td>
+      <td>${item.rating ? `<span style="color:#fbbf24;font-weight:700;">★ ${item.rating}</span>` : '-'}</td>
     `;
 
     tr.addEventListener('click', () => openDetailModal(item));
@@ -532,13 +637,13 @@ function loadMore() {
 }
 
 // ==========================================
-// Hybrid Cover Fetching & Caching System
+// Cover Fetching & Caching
 // ==========================================
 function getKnownCover(cleanTitle, rawTitle) {
   const rawKey = (rawTitle || '').toLowerCase();
   const cleanKey = (cleanTitle || '').toLowerCase();
 
-  // 1. Check window.PRELOADED_COVERS
+  // 1. Check window.PRELOADED_COVERS (From MangaUpdates bulk sync)
   if (window.PRELOADED_COVERS) {
     if (window.PRELOADED_COVERS[rawKey]) return window.PRELOADED_COVERS[rawKey];
     if (window.PRELOADED_COVERS[cleanKey]) return window.PRELOADED_COVERS[cleanKey];
@@ -606,7 +711,6 @@ async function processCoverQueue() {
         setCachedCover(cleanTitle, 'none');
       }
     } catch (err) {
-      console.warn('Cover fetch error for:', cleanTitle, err);
       await sleep(500);
     }
 
@@ -616,11 +720,6 @@ async function processCoverQueue() {
   state.isProcessingQueue = false;
 }
 
-/**
- * Hybrid Fetcher:
- * 1. Primary: MyAnimeList (Jikan API) with 2.5s timeout
- * 2. Fallback: AniList GraphQL API
- */
 async function fetchCoverWithFallback(cleanTitle, rawTitle) {
   const rawKey = rawTitle.toLowerCase();
   const cleanKey = cleanTitle.toLowerCase();
@@ -629,28 +728,18 @@ async function fetchCoverWithFallback(cleanTitle, rawTitle) {
   // 1. Try MyAnimeList (Jikan API) with 2500ms timeout
   try {
     const malCover = await fetchCoverFromJikan(mapped, 2500);
-    if (malCover) {
-      return malCover;
-    }
-  } catch (malErr) {
-    // Jikan timed out, 504 gateway, or 429 rate limit
-    console.info(`[MAL Jikan] (${malErr.message || 'timeout'}) for "${mapped}", falling back to AniList...`);
-  }
+    if (malCover) return malCover;
+  } catch (malErr) {}
 
   // 2. Fallback to AniList
   try {
     const anilistCover = await fetchCoverFromAniList(mapped);
-    if (anilistCover) {
-      return anilistCover;
-    }
-  } catch (aniErr) {
-    console.warn(`[AniList Fallback] error for "${mapped}":`, aniErr.message);
-  }
+    if (anilistCover) return anilistCover;
+  } catch (aniErr) {}
 
   return null;
 }
 
-// 1. Primary: Jikan (MyAnimeList) API with AbortController timeout
 async function fetchCoverFromJikan(query, timeoutMs = 2500) {
   const controller = new AbortController();
   const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
@@ -659,19 +748,12 @@ async function fetchCoverFromJikan(query, timeoutMs = 2500) {
     const url = `https://api.jikan.moe/v4/manga?q=${encodeURIComponent(query)}&limit=1`;
     const res = await fetch(url, { signal: controller.signal });
     clearTimeout(timeoutId);
-
-    if (!res.ok) {
-      throw new Error(`HTTP ${res.status}`);
-    }
-
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
     const json = await res.json();
     if (json.data && json.data.length > 0) {
       const manga = json.data[0];
       const images = manga.images;
-      return images?.webp?.large_image_url ||
-             images?.jpg?.large_image_url ||
-             images?.webp?.image_url ||
-             images?.jpg?.image_url || null;
+      return images?.webp?.large_image_url || images?.jpg?.large_image_url || null;
     }
     return null;
   } catch (err) {
@@ -680,24 +762,14 @@ async function fetchCoverFromJikan(query, timeoutMs = 2500) {
   }
 }
 
-// 2. Fallback: AniList GraphQL API
 async function fetchCoverFromAniList(query) {
   const gqlQuery = `query ($s: String) { Media (search: $s, type: MANGA) { id coverImage { large extraLarge } } }`;
-
   const res = await fetch(CONFIG.ANILIST_API_URL, {
     method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'Accept': 'application/json',
-    },
-    body: JSON.stringify({
-      query: gqlQuery,
-      variables: { s: query }
-    })
+    headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
+    body: JSON.stringify({ query: gqlQuery, variables: { s: query } })
   });
-
   if (!res.ok) throw new Error(`HTTP ${res.status}`);
-
   const json = await res.json();
   const media = json.data?.Media;
   return media?.coverImage?.large || media?.coverImage?.extraLarge || null;
@@ -747,9 +819,10 @@ function getCleanTitle(title) {
 }
 
 // ==========================================
-// Detail Modal
+// Detail Modal & Reading Tracker Controller
 // ==========================================
 function openDetailModal(item) {
+  state.activeItem = item;
   const cleanTitle = getCleanTitle(item.judul);
   const statusBadge = getStatusBadge(item.statusKoleksi);
 
@@ -761,8 +834,10 @@ function openDetailModal(item) {
   DOM.modalStatusBadge.textContent = statusBadge.label;
   DOM.modalStatusBadge.className = `badge ${statusBadge.class}`;
 
+  // Physical Collection calculations
   const totalKoleksi = parseInt(item.totalKoleksi) || 0;
   const totalVolume = parseInt(item.totalVolume) || 0;
+  const maxAvailable = totalKoleksi > 0 ? totalKoleksi : (totalVolume > 0 ? totalVolume : 100);
   const progressPercent = totalVolume > 0 ? Math.min(100, Math.round((totalKoleksi / totalVolume) * 100)) : (totalKoleksi > 0 ? 100 : 0);
 
   DOM.modalVolumeProgressText.textContent = `${totalKoleksi}${totalVolume > 0 ? ' / ' + totalVolume : ''} Vol`;
@@ -780,6 +855,17 @@ function openDetailModal(item) {
     DOM.modalCatatan.textContent = 'Tidak ada catatan kondisi khusus.';
     DOM.modalCatatan.parentElement.style.display = 'block';
   }
+
+  // Populate Reading Tracker UI
+  DOM.modalReadingStatusSelect.value = item.statusBaca || 'Belum Dibaca';
+  DOM.inputReadVol.value = item.volDibaca || 0;
+  DOM.inputReadVol.max = maxAvailable;
+  DOM.inputReview.value = item.reviewBaca || '';
+  DOM.trackerSaveStatus.textContent = '';
+
+  state.activeRating = parseInt(item.rating) || 0;
+  renderRatingStars(state.activeRating);
+  updateReadingProgressUI();
 
   // Cover image
   const coverUrl = getKnownCover(cleanTitle, item.judul);
@@ -801,23 +887,198 @@ function openDetailModal(item) {
   }
 
   // External links
-  const malQuery = TITLE_MAPPINGS[item.judul.toLowerCase()] || cleanTitle;
-  DOM.modalMalLink.href = `https://myanimelist.net/manga.php?q=${encodeURIComponent(malQuery)}`;
-  DOM.modalGoogleLink.href = `https://www.google.com/search?q=${encodeURIComponent('Komik ' + item.judul + ' ' + (item.penerbit || ''))}`;
+  const query = cleanTitle;
+  DOM.modalMuLink.href = `https://www.mangaupdates.com/series.html?search=${encodeURIComponent(query)}`;
+  DOM.modalMalLink.href = `https://myanimelist.net/manga.php?q=${encodeURIComponent(query)}`;
 
   DOM.detailModal.style.display = 'flex';
   document.body.style.overflow = 'hidden';
 }
 
+function updateReadingProgressUI() {
+  if (!state.activeItem) return;
+  const item = state.activeItem;
+  const currentVol = parseInt(DOM.inputReadVol.value) || 0;
+  const totalKoleksi = parseInt(item.totalKoleksi) || 0;
+  const totalVolume = parseInt(item.totalVolume) || 0;
+  const targetTotal = totalKoleksi > 0 ? totalKoleksi : (totalVolume > 0 ? totalVolume : currentVol);
+
+  DOM.modalReadFraction.textContent = `${currentVol} / ${targetTotal} Vol`;
+  const pct = targetTotal > 0 ? Math.min(100, Math.round((currentVol / targetTotal) * 100)) : 0;
+  DOM.modalReadingProgressBar.style.width = `${pct}%`;
+}
+
+function renderRatingStars(score) {
+  DOM.ratingStarsContainer.innerHTML = '';
+  for (let i = 1; i <= 10; i++) {
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = `star-btn ${i <= score ? 'active' : ''}`;
+    btn.innerHTML = '★';
+    btn.dataset.rating = i;
+    btn.title = `Beri rating ${i}/10`;
+
+    btn.addEventListener('mouseenter', () => highlightStars(i));
+    btn.addEventListener('mouseleave', () => highlightStars(state.activeRating));
+    btn.addEventListener('click', () => {
+      state.activeRating = (state.activeRating === i) ? 0 : i; // toggle
+      highlightStars(state.activeRating);
+      updateRatingText(state.activeRating);
+    });
+
+    DOM.ratingStarsContainer.appendChild(btn);
+  }
+  updateRatingText(score);
+}
+
+function highlightStars(score) {
+  const buttons = DOM.ratingStarsContainer.querySelectorAll('.star-btn');
+  buttons.forEach(btn => {
+    const r = parseInt(btn.dataset.rating);
+    if (r <= score) {
+      btn.classList.add('active');
+    } else {
+      btn.classList.remove('active');
+    }
+  });
+}
+
+function updateRatingText(score) {
+  if (score > 0) {
+    DOM.ratingValueDisplay.textContent = `${score} / 10 Bintang`;
+    DOM.ratingValueDisplay.style.color = '#fbbf24';
+  } else {
+    DOM.ratingValueDisplay.textContent = 'Belum ada rating';
+    DOM.ratingValueDisplay.style.color = '#94a3b8';
+  }
+}
+
+// ==========================================
+// Save Reading Tracker (Optimistic + Webhook)
+// ==========================================
+async function saveReadingProgress() {
+  if (!state.activeItem) return;
+  const item = state.activeItem;
+
+  const statusBaca = DOM.modalReadingStatusSelect.value;
+  const volDibaca = parseInt(DOM.inputReadVol.value) || 0;
+  const rating = state.activeRating;
+  const reviewBaca = DOM.inputReview.value.trim();
+
+  // 1. Update active item in memory
+  item.statusBaca = statusBaca;
+  item.volDibaca = volDibaca;
+  item.rating = rating;
+  item.reviewBaca = reviewBaca;
+
+  // 2. Persist to localStorage
+  state.readingTracker[item.no] = {
+    statusBaca,
+    volDibaca,
+    rating,
+    reviewBaca,
+    updatedAt: new Date().toISOString()
+  };
+  localStorage.setItem(CONFIG.TRACKER_STORAGE_KEY, JSON.stringify(state.readingTracker));
+
+  // 3. Update UI
+  updateStatistics();
+  renderView();
+  DOM.trackerSaveStatus.textContent = 'Menyimpan...';
+
+  // 4. Send to Google Spreadsheet via Webhook if configured
+  const webhookUrl = state.settings.webhookUrl;
+  if (webhookUrl && webhookUrl.startsWith('http')) {
+    try {
+      DOM.trackerSaveStatus.textContent = 'Mengirim ke Google Sheets...';
+      const payload = {
+        no: item.no,
+        judul: item.judul,
+        statusBaca: statusBaca,
+        volDibaca: volDibaca,
+        rating: rating,
+        review: reviewBaca
+      };
+
+      // Use mode no-cors or fetch
+      await fetch(webhookUrl, {
+        method: 'POST',
+        mode: 'no-cors',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+      });
+
+      DOM.trackerSaveStatus.textContent = '✓ Tersimpan di Google Sheets!';
+      DOM.trackerSaveStatus.style.color = '#10b981';
+      showToast(`Progres "${item.judul}" tersimpan ke Google Sheets!`, 'success');
+    } catch (e) {
+      console.warn('Google Apps Script webhook error:', e);
+      DOM.trackerSaveStatus.textContent = '✓ Tersimpan Lokal (Gagal kirim ke Sheet)';
+      DOM.trackerSaveStatus.style.color = '#f59e0b';
+      showToast(`Tersimpan di browser. Periksa URL Webhook Google Sheet.`, 'warning');
+    }
+  } else {
+    DOM.trackerSaveStatus.textContent = '✓ Tersimpan di Browser!';
+    DOM.trackerSaveStatus.style.color = '#10b981';
+    showToast(`Progres baca "${item.judul}" berhasil disimpan!`, 'success');
+  }
+
+  setTimeout(() => {
+    if (DOM.trackerSaveStatus) DOM.trackerSaveStatus.textContent = '';
+  }, 3500);
+}
+
 function closeDetailModal() {
   DOM.detailModal.style.display = 'none';
   document.body.style.overflow = '';
+  state.activeItem = null;
+}
+
+// ==========================================
+// Settings Modal
+// ==========================================
+function openSettingsModal() {
+  DOM.inputWebhookUrl.value = state.settings.webhookUrl || '';
+  DOM.settingsModal.style.display = 'flex';
+  document.body.style.overflow = 'hidden';
+}
+
+function closeSettingsModal() {
+  DOM.settingsModal.style.display = 'none';
+  document.body.style.overflow = '';
+}
+
+function saveSettings() {
+  const url = DOM.inputWebhookUrl.value.trim();
+  state.settings.webhookUrl = url;
+  localStorage.setItem(CONFIG.SETTINGS_STORAGE_KEY, JSON.stringify(state.settings));
+  closeSettingsModal();
+  showToast('Pengaturan Google Sheets Webhook berhasil disimpan!', 'success');
+}
+
+function exportBackupData() {
+  const backup = {
+    exportedAt: new Date().toISOString(),
+    totalItems: Object.keys(state.readingTracker).length,
+    trackerData: state.readingTracker
+  };
+
+  const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(backup, null, 2));
+  const downloadAnchor = document.createElement('a');
+  downloadAnchor.setAttribute("href", dataStr);
+  downloadAnchor.setAttribute("download", `MangaVault_Reading_Backup_${new Date().toISOString().slice(0,10)}.json`);
+  document.body.appendChild(downloadAnchor);
+  downloadAnchor.click();
+  downloadAnchor.remove();
+
+  showToast('File backup data bacaan berhasil diunduh!', 'success');
 }
 
 // ==========================================
 // Event Listeners
 // ==========================================
 function setupEventListeners() {
+  // Search
   let searchTimeout;
   DOM.searchInput.addEventListener('input', (e) => {
     clearTimeout(searchTimeout);
@@ -837,6 +1098,7 @@ function setupEventListeners() {
     applyFilters();
   });
 
+  // Status Koleksi Tabs
   DOM.statusTabs.addEventListener('click', (e) => {
     if (e.target.classList.contains('tab-btn')) {
       DOM.statusTabs.querySelectorAll('.tab-btn').forEach(btn => btn.classList.remove('active'));
@@ -846,6 +1108,13 @@ function setupEventListeners() {
     }
   });
 
+  // Reading Status Filter Dropdown
+  DOM.readingStatusFilter.addEventListener('change', (e) => {
+    state.activeFilter.readingStatus = e.target.value;
+    applyFilters();
+  });
+
+  // Other Select Filters
   DOM.publisherFilter.addEventListener('change', (e) => {
     state.activeFilter.publisher = e.target.value;
     applyFilters();
@@ -861,6 +1130,7 @@ function setupEventListeners() {
     applyFilters();
   });
 
+  // View Mode Toggles
   DOM.btnGridView.addEventListener('click', () => {
     DOM.btnGridView.classList.add('active');
     DOM.btnListView.classList.remove('active');
@@ -875,20 +1145,24 @@ function setupEventListeners() {
     renderView();
   });
 
+  // Sync Button
   DOM.btnSync.addEventListener('click', syncWithGoogleSheet);
   DOM.btnLoadMore.addEventListener('click', loadMore);
 
+  // Reset Filters Button
   DOM.btnResetFilters.addEventListener('click', () => {
     DOM.searchInput.value = '';
     DOM.btnClearSearch.style.display = 'none';
     DOM.publisherFilter.value = 'all';
     DOM.typeFilter.value = 'all';
+    DOM.readingStatusFilter.value = 'all';
     DOM.sortFilter.value = 'no-asc';
     DOM.statusTabs.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
     DOM.statusTabs.querySelector('[data-status="all"]').classList.add('active');
 
     state.activeFilter = {
       status: 'all',
+      readingStatus: 'all',
       publisher: 'all',
       type: 'all',
       search: '',
@@ -897,13 +1171,58 @@ function setupEventListeners() {
     applyFilters();
   });
 
+  // Detail Modal Close
   DOM.btnModalClose.addEventListener('click', closeDetailModal);
   DOM.detailModal.addEventListener('click', (e) => {
     if (e.target === DOM.detailModal) closeDetailModal();
   });
+
+  // Stepper controls
+  DOM.btnStepMinus.addEventListener('click', () => {
+    const cur = parseInt(DOM.inputReadVol.value) || 0;
+    if (cur > 0) {
+      DOM.inputReadVol.value = cur - 1;
+      updateReadingProgressUI();
+    }
+  });
+
+  DOM.btnStepPlus.addEventListener('click', () => {
+    const cur = parseInt(DOM.inputReadVol.value) || 0;
+    DOM.inputReadVol.value = cur + 1;
+    if (DOM.modalReadingStatusSelect.value === 'Belum Dibaca') {
+      DOM.modalReadingStatusSelect.value = 'Sedang Dibaca';
+    }
+    updateReadingProgressUI();
+  });
+
+  DOM.inputReadVol.addEventListener('input', () => {
+    updateReadingProgressUI();
+  });
+
+  DOM.btnSetMaxVol.addEventListener('click', () => {
+    if (!state.activeItem) return;
+    const total = parseInt(state.activeItem.totalKoleksi) || parseInt(state.activeItem.totalVolume) || 1;
+    DOM.inputReadVol.value = total;
+    DOM.modalReadingStatusSelect.value = 'Selesai';
+    updateReadingProgressUI();
+  });
+
+  // Save Reading Tracker Button
+  DOM.btnSaveReadingTracker.addEventListener('click', saveReadingProgress);
+
+  // Settings Modal Controls
+  DOM.btnOpenSettings.addEventListener('click', openSettingsModal);
+  DOM.btnSettingsClose.addEventListener('click', closeSettingsModal);
+  DOM.settingsModal.addEventListener('click', (e) => {
+    if (e.target === DOM.settingsModal) closeSettingsModal();
+  });
+  DOM.btnSaveSettings.addEventListener('click', saveSettings);
+  DOM.btnExportBackup.addEventListener('click', exportBackupData);
+
   document.addEventListener('keydown', (e) => {
-    if (e.key === 'Escape' && DOM.detailModal.style.display === 'flex') {
-      closeDetailModal();
+    if (e.key === 'Escape') {
+      if (DOM.detailModal.style.display === 'flex') closeDetailModal();
+      if (DOM.settingsModal.style.display === 'flex') closeSettingsModal();
     }
   });
 }

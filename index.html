@@ -3,8 +3,8 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>MangaVault - Katalog Koleksi Komik Pribadi</title>
-  <meta name="description" content="Koleksi komik dan manga pribadi lengkap dengan status volume, penerbit, dan sampul buku. Disinkronkan dengan Google Sheets.">
+  <title>MangaVault - Katalog & Reading Tracker Koleksi Komik</title>
+  <meta name="description" content="Koleksi komik dan manga pribadi lengkap dengan status volume, tracker membaca, rating, dan cover resmi MangaUpdates. Disinkronkan dengan Google Sheets.">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@400;500;600;700;800&family=Plus+Jakarta+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
@@ -25,7 +25,7 @@
         </div>
         <div>
           <h1 class="brand-title">Manga<span>Vault</span></h1>
-          <p class="brand-subtitle">Arsip Koleksi Komik & Manga Pribadi</p>
+          <p class="brand-subtitle">Katalog Koleksi & Reading Tracker Pribadi</p>
         </div>
       </div>
 
@@ -39,6 +39,12 @@
             <path d="M21.5 2v6h-6M2.5 22v-6h6M2 11.5a10 10 0 0 1 18.8-4.3M22 12.5a10 10 0 0 1-18.8 4.2"/>
           </svg>
           Sync Sheet
+        </button>
+        <button id="btnOpenSettings" class="btn btn-ghost btn-icon" title="Pengaturan Sinkronisasi Google Sheets Webhook">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <circle cx="12" cy="12" r="3"></circle>
+            <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"></path>
+          </svg>
         </button>
       </div>
     </header>
@@ -55,9 +61,24 @@
       <div class="stat-card stat-volumes">
         <div class="stat-icon">📦</div>
         <div class="stat-info">
-          <span class="stat-label">Total Volume Dimiliki</span>
+          <span class="stat-label">Volume Koleksi</span>
           <span class="stat-value" id="statTotalVolumes">0</span>
         </div>
+      </div>
+      <div class="stat-card stat-reading">
+        <div class="stat-icon">📖</div>
+        <div class="stat-info">
+          <span class="stat-label">Sedang Dibaca</span>
+          <span class="stat-value" id="statCurrentlyReading">0</span>
+        </div>
+      </div>
+      <div class="stat-card stat-finished">
+        <div class="stat-icon">🏆</div>
+        <div class="stat-info">
+          <span class="stat-label">Selesai Dibaca</span>
+          <span class="stat-value" id="statFinishedReading">0</span>
+        </div>
+        <div class="stat-badge stat-badge-read" id="statReadPercent">0%</div>
       </div>
       <div class="stat-card stat-complete">
         <div class="stat-icon">✨</div>
@@ -65,20 +86,12 @@
           <span class="stat-label">Koleksi Komplit</span>
           <span class="stat-value" id="statComplete">0</span>
         </div>
-        <div class="stat-badge" id="statCompletePercent">0%</div>
       </div>
       <div class="stat-card stat-pending">
         <div class="stat-icon">🧩</div>
         <div class="stat-info">
           <span class="stat-label">Bolong-bolong</span>
           <span class="stat-value" id="statBolong">0</span>
-        </div>
-      </div>
-      <div class="stat-card stat-later">
-        <div class="stat-icon">⏳</div>
-        <div class="stat-info">
-          <span class="stat-label">Nanti Dulu Deh</span>
-          <span class="stat-value" id="statLater">0</span>
         </div>
       </div>
     </section>
@@ -97,12 +110,24 @@
         </div>
 
         <div class="filter-controls">
-          <!-- Status Tabs -->
+          <!-- Status Koleksi Tabs -->
           <div class="status-tabs" id="statusTabs">
-            <button class="tab-btn active" data-status="all">Semua</button>
+            <button class="tab-btn active" data-status="all">Semua Koleksi</button>
             <button class="tab-btn" data-status="Komplit">Komplit</button>
-            <button class="tab-btn" data-status="Bolong-bolong">Bolong-bolong</button>
+            <button class="tab-btn" data-status="Bolong-bolong">Bolong</button>
             <button class="tab-btn" data-status="Nanti dulu deh">Nanti Dulu</button>
+          </div>
+
+          <!-- Reading Status Filter Dropdown -->
+          <div class="select-wrapper">
+            <select id="readingStatusFilter">
+              <option value="all">Semua Status Baca</option>
+              <option value="Sedang Dibaca">📖 Sedang Dibaca</option>
+              <option value="Selesai">✅ Selesai Dibaca</option>
+              <option value="Belum Dibaca">⏳ Belum Dibaca</option>
+              <option value="On Hold">⏸️ On Hold</option>
+              <option value="Dropped">⏹️ Dropped</option>
+            </select>
           </div>
 
           <!-- Publisher Dropdown -->
@@ -130,7 +155,8 @@
               <option value="title-asc">Judul (A → Z)</option>
               <option value="title-desc">Judul (Z → A)</option>
               <option value="vol-desc">Volume Terbanyak</option>
-              <option value="vol-asc">Volume Tersedikit</option>
+              <option value="rating-desc">Rating Tertinggi</option>
+              <option value="read-desc">Progres Baca Terbanyak</option>
             </select>
           </div>
 
@@ -161,13 +187,13 @@
       <!-- Active Filters Tag Bar -->
       <div class="results-info-bar">
         <span id="resultsCount">Menampilkan 0 buku</span>
-        <div class="cover-cache-status" id="coverCacheStatus" title="Status penyimpanan cache sampul lokal">
+        <div class="cover-cache-status" id="coverCacheStatus" title="Status sinkronisasi MangaUpdates">
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
             <rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect>
             <circle cx="8.5" cy="8.5" r="1.5"></circle>
             <polyline points="21 15 16 10 5 21"></polyline>
           </svg>
-          <span id="coverCacheText">Cache Cover Aktif</span>
+          <span id="coverCacheText">Cover Powered by MangaUpdates</span>
         </div>
       </div>
 
@@ -184,10 +210,10 @@
               <th>Judul</th>
               <th>Pengarang</th>
               <th>Penerbit</th>
-              <th>Status Indo</th>
-              <th>Volume Dimiliki</th>
+              <th>Koleksi Dimiliki</th>
               <th>Status Koleksi</th>
-              <th>Catatan</th>
+              <th>Progres Baca</th>
+              <th>Rating</th>
             </tr>
           </thead>
           <tbody id="mangaTableBody"></tbody>
@@ -213,11 +239,11 @@
 
     <!-- Footer -->
     <footer class="app-footer">
-      <p>MangaVault • Sinkronisasi Langsung dari Google Spreadsheet • Cover powered by Jikan (MyAnimeList)</p>
+      <p>MangaVault • Sinkronisasi Dua Arah Google Spreadsheet • Cover powered by MangaUpdates</p>
     </footer>
   </div>
 
-  <!-- Detail Modal -->
+  <!-- Detail Modal with Reading Tracker -->
   <div id="detailModal" class="modal-backdrop" style="display: none;">
     <div class="modal-card">
       <button class="modal-close" id="btnModalClose">&times;</button>
@@ -235,9 +261,76 @@
           <h2 class="modal-title" id="modalTitle">Judul Manga</h2>
           <p class="modal-author" id="modalAuthor">Nama Pengarang</p>
 
+          <!-- Reading Tracker Section (Interactive) -->
+          <div class="tracker-card">
+            <div class="tracker-header">
+              <span class="tracker-title">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+                  <path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z"></path>
+                  <path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z"></path>
+                </svg>
+                Reading Tracker
+              </span>
+              <div class="tracker-status-select-wrap">
+                <select id="modalReadingStatusSelect" class="tracker-status-select">
+                  <option value="Belum Dibaca">⏳ Belum Dibaca</option>
+                  <option value="Sedang Dibaca">📖 Sedang Dibaca</option>
+                  <option value="Selesai">✅ Selesai Dibaca</option>
+                  <option value="On Hold">⏸️ On Hold</option>
+                  <option value="Dropped">⏹️ Dropped</option>
+                </select>
+              </div>
+            </div>
+
+            <!-- Volume Reading Progress Stepper -->
+            <div class="stepper-section">
+              <div class="stepper-label-row">
+                <span class="stepper-label">Volume Terakhir Dibaca</span>
+                <span class="stepper-fraction" id="modalReadFraction">0 / 0 Vol</span>
+              </div>
+              <div class="stepper-control-row">
+                <button type="button" class="btn-stepper" id="btnStepMinus" title="Kurang 1 volume">-1</button>
+                <input type="number" id="inputReadVol" min="0" value="0" class="stepper-input">
+                <button type="button" class="btn-stepper" id="btnStepPlus" title="Tambah 1 volume">+1</button>
+                <button type="button" class="btn btn-secondary btn-sm" id="btnSetMaxVol">Tamat</button>
+              </div>
+              <div class="progress-bar-bg reading-progress-bg">
+                <div class="progress-bar-fill reading-progress-fill" id="modalReadingProgressBar" style="width: 0%;"></div>
+              </div>
+            </div>
+
+            <!-- Star Rating Section -->
+            <div class="rating-section">
+              <span class="rating-label">Rating Pribadi</span>
+              <div class="rating-stars" id="ratingStarsContainer">
+                <!-- 1 to 10 interactive stars generated dynamically -->
+              </div>
+              <span class="rating-value-display" id="ratingValueDisplay">Belum ada rating</span>
+            </div>
+
+            <!-- Notes / Review -->
+            <div class="review-input-section">
+              <label for="inputReview" class="review-label">Catatan Ulasan / Kesan Membaca</label>
+              <textarea id="inputReview" class="review-textarea" rows="2" placeholder="Tuliskan catatan membaca atau review singkat komik ini..."></textarea>
+            </div>
+
+            <div class="tracker-save-row">
+              <button id="btnSaveReadingTracker" class="btn btn-primary btn-save-tracker">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2">
+                  <path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"></path>
+                  <polyline points="17 21 17 13 7 13 7 21"></polyline>
+                  <polyline points="7 3 7 8 15 8"></polyline>
+                </svg>
+                Simpan Progres
+              </button>
+              <span id="trackerSaveStatus" class="tracker-save-status"></span>
+            </div>
+          </div>
+
+          <!-- Physical Collection Info Card -->
           <div class="volume-card">
             <div class="volume-header">
-              <span class="volume-title">Progres Koleksi Volume</span>
+              <span class="volume-title">Koleksi Fisik Dimiliki</span>
               <span class="volume-count" id="modalVolumeProgressText">0 / 0 Vol</span>
             </div>
             <div class="progress-bar-bg">
@@ -245,7 +338,7 @@
             </div>
             <div class="volume-details-grid">
               <div class="vol-meta-item">
-                <span class="vol-meta-label">Volume yang Dimiliki</span>
+                <span class="vol-meta-label">Nomor Volume Dimiliki</span>
                 <span class="vol-meta-value highlight" id="modalPunyaVolume">-</span>
               </div>
               <div class="vol-meta-item">
@@ -257,35 +350,66 @@
                 <span class="vol-meta-value" id="modalStatusTerbit">-</span>
               </div>
               <div class="vol-meta-item">
-                <span class="vol-meta-label">Total Volume Koleksi</span>
+                <span class="vol-meta-label">Total Buku Dimiliki</span>
                 <span class="vol-meta-value" id="modalTotalKoleksi">-</span>
               </div>
             </div>
           </div>
 
+          <!-- Physical Notes -->
           <div class="modal-notes-section" id="modalNotesSection">
-            <h4 class="section-title">Catatan Koleksi</h4>
+            <h4 class="section-title">Catatan Kondisi Fisik</h4>
             <p class="notes-content" id="modalCatatan">Tidak ada catatan.</p>
           </div>
 
           <div class="modal-actions">
-            <a id="modalMalLink" href="#" target="_blank" rel="noopener noreferrer" class="btn btn-secondary btn-external">
+            <a id="modalMuLink" href="#" target="_blank" rel="noopener noreferrer" class="btn btn-secondary btn-external">
               <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                 <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"></path>
                 <polyline points="15 3 21 3 21 9"></polyline>
                 <line x1="10" y1="14" x2="21" y2="3"></line>
               </svg>
-              Cari di MyAnimeList
+              MangaUpdates
             </a>
-            <a id="modalGoogleLink" href="#" target="_blank" rel="noopener noreferrer" class="btn btn-ghost btn-external">
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                <circle cx="11" cy="11" r="8"></circle>
-                <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
-              </svg>
-              Cari di Google
+            <a id="modalMalLink" href="#" target="_blank" rel="noopener noreferrer" class="btn btn-ghost btn-external">
+              MyAnimeList
             </a>
           </div>
         </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Settings / Google Apps Script Webhook Modal -->
+  <div id="settingsModal" class="modal-backdrop" style="display: none;">
+    <div class="modal-card modal-settings">
+      <button class="modal-close" id="btnSettingsClose">&times;</button>
+      <h3 class="modal-settings-title">Pengaturan Google Spreadsheet Sync</h3>
+      <p class="modal-settings-desc">
+        Hubungkan website dengan <strong>Google Apps Script</strong> agar setiap kali Anda klik tombol <em>Simpan Progres Baca</em> di web, datanya otomatis tersimpan langsung ke Google Spreadsheet Anda secara real-time.
+      </p>
+
+      <div class="settings-form-group">
+        <label for="inputWebhookUrl" class="settings-label">URL Webhook Google Apps Script</label>
+        <input type="url" id="inputWebhookUrl" class="settings-input" placeholder="https://script.google.com/macros/s/.../exec">
+        <span class="settings-hint">Dapatkan URL ini dari menu Extensions &gt; Apps Script &gt; Deploy as Web App di Google Spreadsheet Anda.</span>
+      </div>
+
+      <div class="settings-guide-box">
+        <h4>📋 Cara Pasang Google Apps Script (Hanya 1 Menit):</h4>
+        <ol>
+          <li>Buka Google Spreadsheet koleksi Anda.</li>
+          <li>Pastikan kolom <strong>O (Status Baca)</strong>, <strong>P (Volume Terakhir Dibaca)</strong>, <strong>Q (Rating)</strong>, dan <strong>R (Review Baca)</strong> sudah ada di baris judul (header).</li>
+          <li>Klik menu <strong>Extensions &gt; Apps Script</strong>.</li>
+          <li>Buka file <a href="google-apps-script.js" target="_blank" style="color:#818cf8;">google-apps-script.js</a> di folder project ini, copy seluruh kodenya, dan paste ke editor Apps Script.</li>
+          <li>Klik tombol <strong>Deploy &gt; New deployment</strong>, pilih <em>Web App</em>, atur <em>Who has access</em> ke <strong>Anyone</strong>, lalu klik <strong>Deploy</strong>.</li>
+          <li>Salin (copy) Web App URL yang dihasilkan dan tempelkan ke kolom input di atas!</li>
+        </ol>
+      </div>
+
+      <div class="settings-action-row">
+        <button id="btnSaveSettings" class="btn btn-primary">Simpan Pengaturan</button>
+        <button id="btnExportBackup" class="btn btn-secondary">Backup Data Tracker (JSON)</button>
       </div>
     </div>
   </div>
@@ -295,7 +419,7 @@
 
   <!-- Initial Snapshot Data -->
   <script src="data.js"></script>
-  <!-- Preloaded Cover Art Dictionary -->
+  <!-- Preloaded MangaUpdates Cover Art Dictionary -->
   <script src="covers.js"></script>
   <!-- Main Application Logic -->
   <script src="app.js"></script>
