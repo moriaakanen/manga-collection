@@ -597,7 +597,7 @@ async function processCoverQueue() {
     }
 
     try {
-      const coverUrl = await fetchCoverFromAniList(cleanTitle, rawTitle);
+      const coverUrl = await fetchCoverWithFallback(cleanTitle, rawTitle);
       if (coverUrl) {
         setCachedCover(cleanTitle, coverUrl);
         setCachedCover(rawTitle, coverUrl);
@@ -607,7 +607,7 @@ async function processCoverQueue() {
       }
     } catch (err) {
       console.warn('Cover fetch error for:', cleanTitle, err);
-      await sleep(1000);
+      await sleep(500);
     }
 
     await sleep(CONFIG.RATE_LIMIT_DELAY);
@@ -616,12 +616,73 @@ async function processCoverQueue() {
   state.isProcessingQueue = false;
 }
 
-async function fetchCoverFromAniList(cleanTitle, rawTitle) {
+/**
+ * Hybrid Fetcher:
+ * 1. Primary: MyAnimeList (Jikan API) with 2.5s timeout
+ * 2. Fallback: AniList GraphQL API
+ */
+async function fetchCoverWithFallback(cleanTitle, rawTitle) {
   const rawKey = rawTitle.toLowerCase();
   const cleanKey = cleanTitle.toLowerCase();
   const mapped = TITLE_MAPPINGS[rawKey] || TITLE_MAPPINGS[cleanKey] || cleanTitle;
 
-  const query = `query ($s: String) { Media (search: $s, type: MANGA) { id title { romaji english } coverImage { large extraLarge } } }`;
+  // 1. Try MyAnimeList (Jikan API) with 2500ms timeout
+  try {
+    const malCover = await fetchCoverFromJikan(mapped, 2500);
+    if (malCover) {
+      return malCover;
+    }
+  } catch (malErr) {
+    // Jikan timed out, 504 gateway, or 429 rate limit
+    console.info(`[MAL Jikan] (${malErr.message || 'timeout'}) for "${mapped}", falling back to AniList...`);
+  }
+
+  // 2. Fallback to AniList
+  try {
+    const anilistCover = await fetchCoverFromAniList(mapped);
+    if (anilistCover) {
+      return anilistCover;
+    }
+  } catch (aniErr) {
+    console.warn(`[AniList Fallback] error for "${mapped}":`, aniErr.message);
+  }
+
+  return null;
+}
+
+// 1. Primary: Jikan (MyAnimeList) API with AbortController timeout
+async function fetchCoverFromJikan(query, timeoutMs = 2500) {
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+
+  try {
+    const url = `https://api.jikan.moe/v4/manga?q=${encodeURIComponent(query)}&limit=1`;
+    const res = await fetch(url, { signal: controller.signal });
+    clearTimeout(timeoutId);
+
+    if (!res.ok) {
+      throw new Error(`HTTP ${res.status}`);
+    }
+
+    const json = await res.json();
+    if (json.data && json.data.length > 0) {
+      const manga = json.data[0];
+      const images = manga.images;
+      return images?.webp?.large_image_url ||
+             images?.jpg?.large_image_url ||
+             images?.webp?.image_url ||
+             images?.jpg?.image_url || null;
+    }
+    return null;
+  } catch (err) {
+    clearTimeout(timeoutId);
+    throw err;
+  }
+}
+
+// 2. Fallback: AniList GraphQL API
+async function fetchCoverFromAniList(query) {
+  const gqlQuery = `query ($s: String) { Media (search: $s, type: MANGA) { id coverImage { large extraLarge } } }`;
 
   const res = await fetch(CONFIG.ANILIST_API_URL, {
     method: 'POST',
@@ -630,16 +691,12 @@ async function fetchCoverFromAniList(cleanTitle, rawTitle) {
       'Accept': 'application/json',
     },
     body: JSON.stringify({
-      query: query,
-      variables: { s: mapped }
+      query: gqlQuery,
+      variables: { s: query }
     })
   });
 
-  if (res.status === 429) {
-    throw new Error('AniList 429 Rate Limit');
-  }
-
-  if (!res.ok) return null;
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
 
   const json = await res.json();
   const media = json.data?.Media;
