@@ -1,24 +1,25 @@
 /**
  * MangaVault - Personal Manga Collection Catalog
- * Handles Google Sheets live sync, hybrid cover fetching, search & filtering, and statistics.
+ * Handles Google Sheets live sync, AniList API cover fetching, search & filtering, and statistics.
  */
 
 // Configuration & State
 const CONFIG = {
   SHEET_CSV_URL: 'https://docs.google.com/spreadsheets/d/1Xew5o7ULMmckqOhxIlBQJ1dqHGbREYCGxv47hvkFPS8/gviz/tq?tqx=out:csv',
-  JIKAN_API_URL: 'https://api.jikan.moe/v4/manga',
-  CACHE_PREFIX: 'mv_cover_cache_v2_',
+  ANILIST_API_URL: 'https://graphql.anilist.co',
+  CACHE_PREFIX: 'mv_cover_cache_v3_',
   ITEMS_PER_PAGE: 36,
-  RATE_LIMIT_DELAY: 350 // ms between Jikan API calls to avoid 429
+  RATE_LIMIT_DELAY: 400 // ms between AniList API calls
 };
 
-// Title translation/mapping for better Jikan API matching on Indonesian localized titles
+// Title translation/mapping for better API matching on Indonesian localized titles
 const TITLE_MAPPINGS = {
   'detektif conan premium': 'Detective Conan',
   'detektif conan': 'Detective Conan',
   'detektif kindaichi 37 tahun': 'Kindaichi 37-sai no Jikenbo',
   'detektif kindaichi premium': 'Kindaichi Shounen no Jikenbo',
   'hanako si arwah penasaran': 'Jibaku Shounen Hanako-kun',
+  'hanako si arwah penasaran (bookpaper)': 'Jibaku Shounen Hanako-kun',
   'samurai x: hokkaido arc': 'Rurouni Kenshin: Meiji Kenkaku Romantan - Hokkaido-hen',
   'komikus shojo nozaki': 'Gekkan Shoujo Nozaki-kun',
   'aku no hana : kembang jahanam': 'Aku no Hana',
@@ -28,7 +29,37 @@ const TITLE_MAPPINGS = {
   'frieren: after the end': 'Sousou no Frieren',
   'dr. stone': 'Dr. Stone',
   'oshi no ko: anak idola': 'Oshi no Ko',
-  'hibiki: kiat menjadi novelis': 'Hibiki: Shousetsuka ni Naru Houhou'
+  'hibiki: kiat menjadi novelis': 'Hibiki: Shousetsuka ni Naru Houhou',
+  'attack on titan before the fall': 'Shingeki no Kyojin: Before the Fall',
+  'record of ragnarok': 'Shuumatsu no Valkyrie',
+  'blue box': 'Ao no Hako',
+  'the apothecary diaries': 'Kusuriya no Hitorigoto',
+  'shaman king': 'Shaman King',
+  'city hunter (complete edition)': 'City Hunter',
+  'fist of the north star': 'Hokuto no Ken',
+  'dr. slump (bunkoban)': 'Dr. Slump',
+  'slam dunk new edition (satuan)': 'Slam Dunk',
+  'jojo\'s bizzare adventure': 'JoJo no Kimyou na Bouken',
+  'teasing master, takagi': 'Karakai Jouzu no Takagi-san',
+  'boruto - naruto next generation': 'Boruto: Naruto Next Generations',
+  'the quintessential quintuplets': '5-toubun no Hanayome',
+  'wotakoi: love is hard for otaku': 'Wotaku ni Koi wa Muzukashii',
+  'dead mount death play': 'Dead Mount Death Play',
+  'sakamoto days': 'Sakamoto Days',
+  'kanojo okarishimasu': 'Kanojo, Okarishimasu',
+  'bungo stray dogs': 'Bungou Stray Dogs',
+  'a couple of cuckoos': 'Kakkou no Iinazuke',
+  'alice in borderland': 'Imawa no Kuni no Alice',
+  'kubo won\'t let me be invisible': 'Kubo-san wa Mob wo Yurusanai',
+  'blood lad': 'Blood Lad',
+  'mashle': 'Mashle',
+  'one week friends': 'Isshuukan Friends.',
+  'the promised neverland': 'Yakusoku no Neverland',
+  'chainsaw man': 'Chainsaw Man',
+  'demon slayer: kimetsu no yaiba': 'Kimetsu no Yaiba',
+  'jujutsu kaisen': 'Jujutsu Kaisen',
+  'spy x family': 'Spy x Family',
+  'kaguya-sama: love is war': 'Kaguya-sama wa Kokurasetai: Tensai-tachi no Renai Zunousen'
 };
 
 const state = {
@@ -113,7 +144,6 @@ document.addEventListener('DOMContentLoaded', () => {
   if (window.INITIAL_MANGA_DATA && Array.isArray(window.INITIAL_MANGA_DATA)) {
     loadData(window.INITIAL_MANGA_DATA);
   } else {
-    // Or fetch from sheet directly
     syncWithGoogleSheet();
   }
 });
@@ -285,7 +315,6 @@ function applyFilters() {
   const q = search.trim().toLowerCase();
 
   state.filteredManga = state.allManga.filter(item => {
-    // Status filter
     if (status !== 'all') {
       const itemStatus = (item.statusKoleksi || '').toLowerCase();
       if (status === 'Komplit' && !itemStatus.includes('komplit')) return false;
@@ -293,17 +322,14 @@ function applyFilters() {
       if (status === 'Nanti dulu deh' && !itemStatus.includes('nanti')) return false;
     }
 
-    // Publisher filter
     if (publisher !== 'all' && (item.penerbit || '').trim() !== publisher) {
       return false;
     }
 
-    // Type filter
     if (type !== 'all' && (item.jenis || '').trim().toLowerCase() !== type.toLowerCase()) {
       return false;
     }
 
-    // Search query
     if (q) {
       const titleMatch = (item.judul || '').toLowerCase().includes(q);
       const authorMatch = (item.pengarang || '').toLowerCase().includes(q) || (item.story || '').toLowerCase().includes(q);
@@ -315,7 +341,6 @@ function applyFilters() {
     return true;
   });
 
-  // Sort
   state.filteredManga.sort((a, b) => {
     switch (sort) {
       case 'no-asc': return a.no - b.no;
@@ -366,7 +391,6 @@ function renderGrid() {
   const countToShow = state.currentPage * CONFIG.ITEMS_PER_PAGE;
   const itemsToRender = state.filteredManga.slice(0, countToShow);
 
-  // If on page 1, clear container; otherwise append newly loaded items
   if (state.currentPage === 1) {
     DOM.mangaGrid.innerHTML = '';
   }
@@ -385,21 +409,27 @@ function renderGrid() {
     const publisherName = item.penerbit || 'Umum';
     const cleanTitle = getCleanTitle(item.judul);
 
-    // Volume calculation
     const totalKoleksi = parseInt(item.totalKoleksi) || 0;
     const totalVolume = parseInt(item.totalVolume) || 0;
     const progressPercent = totalVolume > 0 ? Math.min(100, Math.round((totalKoleksi / totalVolume) * 100)) : (totalKoleksi > 0 ? 100 : 0);
+
+    // Check if we already have the cover (from preloaded dictionary or local storage)
+    const knownCover = getKnownCover(cleanTitle, item.judul);
 
     card.innerHTML = `
       <div class="card-cover-container" data-title="${encodeURIComponent(cleanTitle)}" data-raw-title="${encodeURIComponent(item.judul)}">
         <span class="card-number-badge">#${item.no}</span>
         <span class="card-status-badge ${statusBadge.class}">${statusBadge.label}</span>
         
-        <!-- Image element for Jikan / cached cover -->
-        <img class="card-cover-img" alt="${escapeHTML(item.judul)}" loading="lazy">
+        <!-- Image element -->
+        <img class="card-cover-img ${knownCover ? 'loaded' : ''}" 
+             src="${knownCover || ''}" 
+             alt="${escapeHTML(item.judul)}" 
+             loading="lazy" 
+             style="${knownCover ? 'display:block;opacity:1;' : ''}">
         
-        <!-- Fallback stylized book cover if image not yet loaded/found -->
-        <div class="card-fallback-cover">
+        <!-- Fallback stylized book cover -->
+        <div class="card-fallback-cover" style="${knownCover ? 'display:none;' : ''}">
           <span class="fallback-publisher">${escapeHTML(publisherName)}</span>
           <h3 class="fallback-title">${escapeHTML(item.judul)}</h3>
           <p class="fallback-author">${escapeHTML(item.pengarang || item.story || '-')}</p>
@@ -429,10 +459,12 @@ function renderGrid() {
 
     card.addEventListener('click', () => openDetailModal(item));
 
-    // Observe cover container for lazy loading cover from Jikan API
-    const coverContainer = card.querySelector('.card-cover-container');
-    if (state.observer) {
-      state.observer.observe(coverContainer);
+    // If cover not yet known, observe for lazy loading via AniList API
+    if (!knownCover) {
+      const coverContainer = card.querySelector('.card-cover-container');
+      if (state.observer) {
+        state.observer.observe(coverContainer);
+      }
     }
 
     fragment.appendChild(card);
@@ -454,12 +486,12 @@ function renderTable() {
 
     const statusBadge = getStatusBadge(item.statusKoleksi);
     const cleanTitle = getCleanTitle(item.judul);
-    const cachedCover = getCachedCover(cleanTitle);
+    const coverUrl = getKnownCover(cleanTitle, item.judul);
 
     tr.innerHTML = `
       <td><strong>#${item.no}</strong></td>
       <td>
-        ${cachedCover ? `<img src="${cachedCover}" class="table-thumb" alt="cover">` : `<div class="table-thumb" style="background:#1e293b;display:flex;align-items:center;justify-content:center;font-size:10px;">📖</div>`}
+        ${coverUrl ? `<img src="${coverUrl}" class="table-thumb" alt="cover">` : `<div class="table-thumb" style="background:#1e293b;display:flex;align-items:center;justify-content:center;font-size:10px;">📖</div>`}
       </td>
       <td><strong>${escapeHTML(item.judul)}</strong></td>
       <td>${escapeHTML(item.pengarang || item.story || '-')}</td>
@@ -502,6 +534,23 @@ function loadMore() {
 // ==========================================
 // Hybrid Cover Fetching & Caching System
 // ==========================================
+function getKnownCover(cleanTitle, rawTitle) {
+  const rawKey = (rawTitle || '').toLowerCase();
+  const cleanKey = (cleanTitle || '').toLowerCase();
+
+  // 1. Check window.PRELOADED_COVERS
+  if (window.PRELOADED_COVERS) {
+    if (window.PRELOADED_COVERS[rawKey]) return window.PRELOADED_COVERS[rawKey];
+    if (window.PRELOADED_COVERS[cleanKey]) return window.PRELOADED_COVERS[cleanKey];
+  }
+
+  // 2. Check localStorage cache
+  const cached = getCachedCover(cleanKey) || getCachedCover(rawKey);
+  if (cached && cached !== 'none') return cached;
+
+  return null;
+}
+
 function setupIntersectionObserver() {
   if (!('IntersectionObserver' in window)) return;
 
@@ -514,7 +563,7 @@ function setupIntersectionObserver() {
       }
     });
   }, {
-    rootMargin: '200px 0px',
+    rootMargin: '300px 0px',
     threshold: 0.01
   });
 }
@@ -522,18 +571,14 @@ function setupIntersectionObserver() {
 function queueCoverFetch(container) {
   const cleanTitle = decodeURIComponent(container.dataset.title || '');
   const rawTitle = decodeURIComponent(container.dataset.rawTitle || '');
-  if (!cleanTitle) return;
+  if (!cleanTitle && !rawTitle) return;
 
-  // 1. Check local storage cache
-  const cachedUrl = getCachedCover(cleanTitle);
-  if (cachedUrl) {
-    if (cachedUrl !== 'none') {
-      applyCoverToContainer(container, cachedUrl);
-    }
+  const known = getKnownCover(cleanTitle, rawTitle);
+  if (known) {
+    applyCoverToContainer(container, known);
     return;
   }
 
-  // 2. Add to fetch queue
   state.coverQueue.push({ container, cleanTitle, rawTitle });
   processCoverQueue();
 }
@@ -545,24 +590,23 @@ async function processCoverQueue() {
   while (state.coverQueue.length > 0) {
     const { container, cleanTitle, rawTitle } = state.coverQueue.shift();
 
-    // Check again if now cached
-    const cached = getCachedCover(cleanTitle);
-    if (cached) {
-      if (cached !== 'none') applyCoverToContainer(container, cached);
+    const known = getKnownCover(cleanTitle, rawTitle);
+    if (known) {
+      applyCoverToContainer(container, known);
       continue;
     }
 
     try {
-      const coverUrl = await fetchCoverFromJikan(cleanTitle, rawTitle);
+      const coverUrl = await fetchCoverFromAniList(cleanTitle, rawTitle);
       if (coverUrl) {
         setCachedCover(cleanTitle, coverUrl);
+        setCachedCover(rawTitle, coverUrl);
         applyCoverToContainer(container, coverUrl);
       } else {
         setCachedCover(cleanTitle, 'none');
       }
     } catch (err) {
-      console.warn('Cover fetch rate limit or network error for:', cleanTitle, err);
-      // Wait longer on error
+      console.warn('Cover fetch error for:', cleanTitle, err);
       await sleep(1000);
     }
 
@@ -572,31 +616,34 @@ async function processCoverQueue() {
   state.isProcessingQueue = false;
 }
 
-async function fetchCoverFromJikan(cleanTitle, rawTitle) {
-  // Check special mappings first
-  const mapped = TITLE_MAPPINGS[rawTitle.toLowerCase()] || TITLE_MAPPINGS[cleanTitle.toLowerCase()];
-  const query = mapped || cleanTitle;
+async function fetchCoverFromAniList(cleanTitle, rawTitle) {
+  const rawKey = rawTitle.toLowerCase();
+  const cleanKey = cleanTitle.toLowerCase();
+  const mapped = TITLE_MAPPINGS[rawKey] || TITLE_MAPPINGS[cleanKey] || cleanTitle;
 
-  const url = `${CONFIG.JIKAN_API_URL}?q=${encodeURIComponent(query)}&limit=1`;
-  const res = await fetch(url);
-  
+  const query = `query ($s: String) { Media (search: $s, type: MANGA) { id title { romaji english } coverImage { large extraLarge } } }`;
+
+  const res = await fetch(CONFIG.ANILIST_API_URL, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'Accept': 'application/json',
+    },
+    body: JSON.stringify({
+      query: query,
+      variables: { s: mapped }
+    })
+  });
+
   if (res.status === 429) {
-    throw new Error('Jikan API 429 Too Many Requests');
+    throw new Error('AniList 429 Rate Limit');
   }
 
   if (!res.ok) return null;
 
   const json = await res.json();
-  if (json.data && json.data.length > 0) {
-    const manga = json.data[0];
-    const images = manga.images;
-    if (images && images.webp && images.webp.large_image_url) {
-      return images.webp.large_image_url;
-    } else if (images && images.jpg && images.jpg.large_image_url) {
-      return images.jpg.large_image_url;
-    }
-  }
-  return null;
+  const media = json.data?.Media;
+  return media?.coverImage?.large || media?.coverImage?.extraLarge || null;
 }
 
 function applyCoverToContainer(container, url) {
@@ -608,6 +655,8 @@ function applyCoverToContainer(container, url) {
     img.src = url;
     img.onload = () => {
       img.classList.add('loaded');
+      img.style.display = 'block';
+      img.style.opacity = '1';
       if (fallback) fallback.style.display = 'none';
     };
     img.onerror = () => {
@@ -618,6 +667,7 @@ function applyCoverToContainer(container, url) {
 }
 
 function getCachedCover(title) {
+  if (!title) return null;
   try {
     return localStorage.getItem(CONFIG.CACHE_PREFIX + title.toLowerCase());
   } catch (e) {
@@ -626,14 +676,12 @@ function getCachedCover(title) {
 }
 
 function setCachedCover(title, url) {
+  if (!title) return;
   try {
     localStorage.setItem(CONFIG.CACHE_PREFIX + title.toLowerCase(), url);
-  } catch (e) {
-    // Quota exceeded handled silently
-  }
+  } catch (e) {}
 }
 
-// Clean title: remove parenthetical tags like "(Bookpaper)", "(Complete Edition)", etc.
 function getCleanTitle(title) {
   if (!title) return '';
   let cleaned = title.replace(/\([^)]*\)/g, '').trim();
@@ -656,7 +704,6 @@ function openDetailModal(item) {
   DOM.modalStatusBadge.textContent = statusBadge.label;
   DOM.modalStatusBadge.className = `badge ${statusBadge.class}`;
 
-  // Volume calculations
   const totalKoleksi = parseInt(item.totalKoleksi) || 0;
   const totalVolume = parseInt(item.totalVolume) || 0;
   const progressPercent = totalVolume > 0 ? Math.min(100, Math.round((totalKoleksi / totalVolume) * 100)) : (totalKoleksi > 0 ? 100 : 0);
@@ -669,7 +716,6 @@ function openDetailModal(item) {
   DOM.modalStatusTerbit.textContent = item.statusTerbit || 'Ongoing';
   DOM.modalTotalKoleksi.textContent = `${totalKoleksi} Volume`;
 
-  // Notes
   if (item.catatan && item.catatan.trim()) {
     DOM.modalCatatan.textContent = item.catatan;
     DOM.modalCatatan.parentElement.style.display = 'block';
@@ -679,9 +725,9 @@ function openDetailModal(item) {
   }
 
   // Cover image
-  const cachedCover = getCachedCover(cleanTitle);
-  if (cachedCover && cachedCover !== 'none') {
-    DOM.modalCoverImg.src = cachedCover;
+  const coverUrl = getKnownCover(cleanTitle, item.judul);
+  if (coverUrl) {
+    DOM.modalCoverImg.src = coverUrl;
     DOM.modalCoverImg.style.display = 'block';
     DOM.modalCoverFallback.style.display = 'none';
   } else {
@@ -715,7 +761,6 @@ function closeDetailModal() {
 // Event Listeners
 // ==========================================
 function setupEventListeners() {
-  // Search
   let searchTimeout;
   DOM.searchInput.addEventListener('input', (e) => {
     clearTimeout(searchTimeout);
@@ -735,7 +780,6 @@ function setupEventListeners() {
     applyFilters();
   });
 
-  // Status Tabs
   DOM.statusTabs.addEventListener('click', (e) => {
     if (e.target.classList.contains('tab-btn')) {
       DOM.statusTabs.querySelectorAll('.tab-btn').forEach(btn => btn.classList.remove('active'));
@@ -745,7 +789,6 @@ function setupEventListeners() {
     }
   });
 
-  // Select Filters
   DOM.publisherFilter.addEventListener('change', (e) => {
     state.activeFilter.publisher = e.target.value;
     applyFilters();
@@ -761,7 +804,6 @@ function setupEventListeners() {
     applyFilters();
   });
 
-  // View Mode Toggles
   DOM.btnGridView.addEventListener('click', () => {
     DOM.btnGridView.classList.add('active');
     DOM.btnListView.classList.remove('active');
@@ -776,13 +818,9 @@ function setupEventListeners() {
     renderView();
   });
 
-  // Sync Button
   DOM.btnSync.addEventListener('click', syncWithGoogleSheet);
-
-  // Load More Button
   DOM.btnLoadMore.addEventListener('click', loadMore);
 
-  // Reset Filters Button
   DOM.btnResetFilters.addEventListener('click', () => {
     DOM.searchInput.value = '';
     DOM.btnClearSearch.style.display = 'none';
@@ -802,7 +840,6 @@ function setupEventListeners() {
     applyFilters();
   });
 
-  // Modal Close
   DOM.btnModalClose.addEventListener('click', closeDetailModal);
   DOM.detailModal.addEventListener('click', (e) => {
     if (e.target === DOM.detailModal) closeDetailModal();
@@ -814,9 +851,6 @@ function setupEventListeners() {
   });
 }
 
-// ==========================================
-// Helper Utilities
-// ==========================================
 function getStatusBadge(status) {
   const s = (status || '').toLowerCase();
   if (s.includes('komplit') || s.includes('lengkap')) {
